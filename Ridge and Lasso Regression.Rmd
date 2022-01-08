@@ -1,0 +1,180 @@
+---
+title: "Ridge and Lasso Regression"
+author: "Phong Hoang"
+date: "12/9/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Importing Library and DataSet
+```{r}
+require(car)
+```
+
+```{r}
+library(glmnet)
+```
+
+```{r}
+boston = read.csv("http://personal.denison.edu/~whiteda/files/Teaching/boston.csv",header=TRUE)
+```
+
+# Exploratory Data Analysis
+
+```{r}
+boston <- boston[ -c(1) ]
+```
+
+```{r}
+head(boston)
+nrow(boston)
+ncol(boston)
+str(boston)
+```
+
+There are 14 attributes in each case of the dataset. They are:
+
+  1. CRIM - per capita crime rate by town
+  
+  2. ZN - proportion of residential land zoned for lots over 25,000 sq.ft.
+  
+  3. INDUS - proportion of non-retail business acres per town.
+  
+  4. CHAS - Charles River dummy variable (1 if tract bounds river; 0 otherwise)
+  
+  5. NOX - nitric oxides concentration (parts per 10 million)
+  
+  6. RM - average number of rooms per dwelling
+  
+  7. AGE - proportion of owner-occupied units built prior to 1940
+  8. DIS - weighted distances to five Boston employment centres
+  9. RAD - index of accessibility to radial highways
+  10. TAX - full-value property-tax rate per $10,000
+  11. PTRATIO - pupil-teacher ratio by town
+  12. B - 1000(Bk - 0.63)^2 where Bk is the proportion of blacks by town
+  13. LSTAT - % lower status of the population
+  14. MEDV - Median value of owner-occupied homes in $1000's
+
+```{r}
+#descriptive statistics for response variables
+sd(boston$nox)
+summary(boston$nox)
+```
+
+```{r}
+#Finding the VIF score for predictors
+mod.full = lm(nox~.,data=boston)
+vif(mod.full)
+```
+
+The VIF scores for several predictors are closed to 5, especially with `radial` peeks at 7.495 and `tax` peeks at 9.078. The high VIF scores suggest the variables in the data is highly-correlated, matches with our need to examine the use of Ridge and Lasso Regression in dealing with data has multicolinearity. 
+
+# Fitting Regression
+
+## Data Preparation
+
+```{r}
+# creating predictors data set and response data set
+X = model.matrix(nox ~ ., boston)[, -1]
+y = boston$nox
+```
+
+```{r}
+# Standardizing and spilt training set and test set
+X <- scale(X, center = TRUE, scale = TRUE)
+train = boston[1:400, ]
+X_train = X[1:400,]
+X_test = X[401:500,]
+y_train = y[1:400]
+y_test = y[401:500]
+```
+
+We scaled the independence variables, then split our data to a training set and a test set. We can confidence split the data as this because there is no particular for our original data. We begin by fitting a simple linear regression, predicting `nox` by using all predictors without any regularization, making it vulnerable against overfitting.
+
+## Fitting Linear Regression
+
+```{r}
+lmMod <- lm(nox ~ ., data = train)
+summary(lmMod)
+```
+The model achieves a good R-squared error of 0.7926, explaining 79% of the variability of the response variable. Let's see it prediction on the test set. 
+
+```{r}
+X_test <- as.data.frame(X_test)
+linear_predition <- predict(lmMod,X_test)
+```
+
+```{r}
+Linear_mse <- mean((linear_predition - y_test)^2)
+Linear_mse
+```
+
+The mean squared error for the linear prediction with the y_test is just 0.0378. I think it has been overfitted badly. Let's see whether regularized model can fix this problem.
+
+## Fitting Ridge Regression
+
+```{r}
+fit_ridge = glmnet(X_train, y_train, alpha = 0)
+plot(fit_ridge)
+plot(fit_ridge, xvar = "lambda", label = TRUE)
+```
+
+In both Ridge Trace Plots, each curve represents for a different coefficients in the Ridge model. In the first plot, they are plotted against the lambda values on the x-axis, while in the second one, the values of regularization term are used as a measurement. These plots has demonstrated the characteristics of the regularization models, while as lambda get bigger, the coefficients shrink toward zero, but none of them will go down to zero. As a result of the increase in the lambda, the Ridge cost function becomes more rely on the regularization term; thus, we can see in the second plot, when this term approaches to 0, it indicates that its coefficients are also relative small. Besides studying how these coefficients behave based on the value of lambda, Ridge Regression is also an optimized mathematics problem, in which we need to find the best lambda value by utilizing the cross-validation plot.
+
+```{r}
+fit_ridge_cv = cv.glmnet(X_train, y_train, alpha = 0)
+plot(fit_ridge_cv)
+optimal_lambda <- fit_ridge_cv$lambda.min
+optimal_lambda
+```
+
+```{r}
+X_test = X[401:500,]
+Ridge_prediction <- predict(fit_ridge, s = optimal_lambda, newx = X_test)
+Ridge_mse <- mean((Ridge_prediction - y_test)^2)
+Ridge_mse
+```
+
+By performing 10-fold cross validation on the training set, the function plots the model's mean squared error against the value of lambda. The straight line is the optimal lambda value for this data set, which corresponds to the least mean squared error possible. The optimal lambda for Ridge Regression is 0.0085. We then ready to generate prediction with our Ridge model, comparing with the real data and get a mean squared error of 0.007954039. We observe a significant decrease in the mean squared error; thus, the precision of the model has been improved by Ridge Regression.
+
+```{r}
+coef(fit_ridge_cv, s = "lambda.min")
+```
+
+As the Ridge Trace Plot has pointed out, all the coefficients are closed to 0, but none of them are equal to 0.
+
+## Fitting Lasso
+
+```{r}
+fit_lasso = glmnet(X_train, y_train, alpha = 1)
+plot(fit_lasso)
+plot(fit_lasso, xvar = "lambda", label = TRUE)
+```
+
+We can see the similarity in the reaction of the model's coefficients based on the value of lambda, as a fundamental goal of applying regularization into linear regression is to constrain the model's parameters. On the other hand, it is not difficult to notice the curves which represent models are actually go down to 0 in the first graph as the lambda increase or start from 0 as the regularization term grows in the second graph. These behaviors demonstrated the difference between Lasso and Ridge, in which Lasso allows its coefficients to be 0, resemble to the feature selection process. Let's see the cross-validation plot for Lasso.
+
+```{r}
+fit_lasso_cv = cv.glmnet(X_train, y_train, alpha = 1)
+plot(fit_lasso_cv)
+optimal_lambda_1 <- fit_lasso_cv$lambda.min
+optimal_lambda_1
+```
+
+Using the same method of cross-validation, Lasso cross-validation plots graphs the mean squared error of the model against the lambda. Notice the line of number above the graph is representing the number of predictors used by Lasso Regression. Unlike Ridge's Plot which keep all thirteen variables, the number of variables starts decreasing as lambda increase; once again, demonstrating the unique characteristics of Lasso in choosing best parameters for the model. The greatest lambda values for Lasso is 0.00068, returning a mean squared error of 0.007923537 between its prediction and the real data. This mean squared error suggests that Lasso performs slightly better than Ridge, which fits what we have discussed on the choice of model in the situation of having a highly-correlated dataset.
+
+```{r}
+Lasso_prediction <- predict(fit_lasso, s = optimal_lambda_1, newx = X_test)
+Lasso_mse <- mean((Lasso_prediction - y_test)^2)
+Lasso_mse
+```
+
+Lasso Regression also significantly reduces the mean squared error of the prediction and the real data set to 0.007979. Let's see its Lasso's coefficients.
+
+```{r}
+coef(fit_lasso_cv, s = "lambda.min")
+```
+
+The one coefficient for `lstat` is equal to 0, as Lasso is performing features selection. Other coefficients is also closed to 0, as the Lasso Trace Plot has pointed out.
